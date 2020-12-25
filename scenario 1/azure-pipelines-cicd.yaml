@@ -1,0 +1,105 @@
+name: '$(BuildDefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd)_$(Rev:.r)' # instead of default name of build, having the name of the build
+trigger:   # setting trigger of the branch, the build will trigger once the code is merged in the inculded branches,we can do furthers filter with the paths if required
+  branches:
+    include:
+      - master
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+  - stage: "Build"
+    displayName: "Build"
+    jobs:
+      - job: "Build"
+        displayName: "Build job"
+        steps:
+          - task: UseDotNet@2
+            displayName: 'Install 3.0'
+            inputs:
+              packageType: 'sdk'
+              version: '3.0.x'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore'
+            inputs:
+              command: 'restore'
+              projects: '**/*.csproj'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Build'
+            inputs:
+              command: build
+              projects: '**/*.csproj'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Unit Test'
+            inputs:
+              command: 'test'
+              projects: '**/web-api-tests.csproj' # csproj path for the unittest project
+            continueOnError: true
+
+          - task: DotNetCoreCLI@2   
+            displayName: "Publish" # Creating the Zip file and pushing into the Artifactstaging directory
+            inputs:
+                command: "publish"
+                publishWebProjects: false
+                projects: |
+                 **/*.csproj
+                arguments: "--output $(Build.ArtifactStagingDirectory)"
+                zipAfterPublish: true
+
+          - publish: $(Build.ArtifactStagingDirectory)
+            displayName: 'Publish Artifacts'
+            artifact: drop
+
+  - stage: "Dev"
+    displayName: "Deploy Dev"
+    jobs:
+        - deployment: Deploy_Dev
+          environment: Dev
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                   
+                   - task: AzureWebApp@1
+                     displayName: 'Dev Deployment'
+                     inputs:
+                       azureSubscription: 'Dev Subscription'
+                       appType: 'webApp'
+                       appName: devwebapp
+                       package: '$(Pipeline.Workspace)/**/*.zip'
+  
+  - stage: "QA"
+    displayName: "Deploy QA"
+    jobs:
+        - deployment: Deploy_QA
+          environment: QA
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                   
+                   - task: AzureWebApp@1
+                     inputs:
+                       azureSubscription: 'QA Subscription'
+                       appType: 'webApp'
+                       appName: qawebapp
+                       package: '$(Pipeline.Workspace)/**/*.zip'
+
+  - stage: "PROD"
+    displayName: "Deploy PROD"
+    jobs:
+        - deployment: Deploy_PROD
+          environment: PROD
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                   
+                   - task: AzureWebApp@1
+                     inputs:
+                       azureSubscription: 'Prod Subscription'
+                       appType: 'webApp'
+                       appName: prodwebapp
+                       package: '$(Pipeline.Workspace)/**/*.zip'                       
